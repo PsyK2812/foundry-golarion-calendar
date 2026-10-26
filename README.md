@@ -6,4 +6,4 @@ GM and player notes, moon phases with Golarion full moon names, seasonal sunrise
 and automatic scene darkness that follows the time of day and the moon.
 
 Install via manifest URL:
-https://github.com/PsyK2812/foundry-golarion-calendar/releases/latest/download/module.json
+https://raw.githubusercontent.com/PsyK2812/foundry-golarion-calendar/main/module.json
