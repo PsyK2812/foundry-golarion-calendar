@@ -1,0 +1,25 @@
+{
+  "id": "golarion-calendar",
+  "title": "Golarion Calendar",
+  "description": "Absalom Reckoning (Golarion) calendar: draggable date & time widget that expands into a month view, configurable time buttons, GM and player notes, moon phases, seasonal sunrise/sunset, and automatic scene darkness that follows the time of day and the moon.",
+  "version": "1.4.0",
+  "authors": [
+    {
+      "name": "Yannic"
+    }
+  ],
+  "compatibility": {
+    "minimum": "13",
+    "verified": "14"
+  },
+  "esmodules": [
+    "scripts/main.js"
+  ],
+  "styles": [
+    "styles/calendar.css"
+  ],
+  "socket": true,
+  "url": "https://github.com/PsyK2812/foundry-golarion-calendar",
+  "manifest": "https://github.com/PsyK2812/foundry-golarion-calendar/releases/latest/download/module.json",
+  "download": "https://github.com/PsyK2812/foundry-golarion-calendar/releases/download/v1.4.0/golarion-calendar.zip"
+}

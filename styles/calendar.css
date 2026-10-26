@@ -1,0 +1,116 @@
+/* ================= Golarion Calendar widget ================= */
+#golarion-calendar-widget {
+  --gc-gold: #e0b94a;
+  --gc-gold-dim: rgba(224, 185, 74, 0.28);
+  --gc-text: #ece6d8;
+  --gc-muted: rgba(236, 230, 216, 0.65);
+  --gc-line: rgba(255, 255, 255, 0.14);
+  --gc-bg: rgba(22, 18, 12, 0.9);
+  --gc-border: rgba(224, 185, 74, 0.55);
+  --gc-tint: rgba(255, 255, 255, 0.06);
+  position: fixed;
+  z-index: 70;
+  font-size: calc(13px * var(--gc-scale, 1));
+  width: 12.5em;
+  color: var(--gc-text);
+  background: var(--gc-bg);
+  border: 1px solid var(--gc-border);
+  border-radius: 0.6em;
+  padding: 0.45em 0.6em 0.55em;
+  box-shadow: 0 0.2em 0.8em rgba(0, 0, 0, 0.55);
+  user-select: none;
+  cursor: grab;
+  font-family: var(--font-body, "Signika", sans-serif);
+}
+#golarion-calendar-widget.gc-expanded { width: 25em; }
+#golarion-calendar-widget.gc-dragging { opacity: 0.85; cursor: grabbing; }
+#golarion-calendar-widget a { color: inherit; cursor: pointer; }
+#golarion-calendar-widget a:hover { color: var(--gc-gold); text-shadow: none; }
+
+.gc-w-top { display: flex; align-items: center; gap: 0.4em; }
+.gc-w-tod { font-size: 1.1em; width: 1.1em; text-align: center; }
+.gc-tod-dawn, .gc-tod-dusk { color: #f0a35e; }
+.gc-tod-morning, .gc-tod-midday, .gc-tod-afternoon { color: #f5d469; }
+.gc-tod-evening, .gc-tod-night { color: #9fb4e8; }
+.gc-w-weekday { flex: 1; color: var(--gc-muted); font-size: 0.92em; }
+.gc-w-moon { font-size: 1em; }
+.gc-w-date { margin-top: 0.25em; text-align: center; font-size: 1.45em; font-weight: bold; line-height: 1.15;
+  color: var(--gc-gold); font-family: var(--font-h1, serif); }
+.gc-w-year { text-align: center; font-size: 0.85em; color: var(--gc-muted); }
+.gc-w-time { text-align: center; font-size: 1em; margin-top: 0.15em; }
+.gc-w-event { color: var(--gc-gold); margin-left: 0.4em; }
+.gc-w-event i { margin-right: 0.15em; font-size: 0.85em; }
+.gc-w-expand { padding: 0.1em 0.3em; border-radius: 0.3em; }
+.gc-w-expand:hover { background: var(--gc-gold-dim); }
+
+.gc-expanded .gc-w-date { font-size: 1.25em; }
+
+.gc-w-buttons { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.2em; margin-top: 0.45em; }
+#golarion-calendar-widget button {
+  min-width: 0;
+  height: 1.9em;
+  line-height: 1;
+  padding: 0 0.35em;
+  margin: 0;
+  font-size: 0.85em;
+  color: var(--gc-text);
+  background: var(--gc-tint);
+  border: 1px solid var(--gc-line);
+  border-radius: 0.3em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+#golarion-calendar-widget button:hover { background: var(--gc-gold-dim); border-color: var(--gc-gold); }
+
+/* ---------- expanded month view ---------- */
+.gc-cal { margin-top: 0.5em; border-top: 1px solid var(--gc-line); padding-top: 0.45em; }
+.gc-header { display: flex; align-items: center; gap: 0.35em; }
+.gc-header > a { padding: 0.15em 0.3em; border-radius: 0.3em; }
+.gc-header > a:hover { background: var(--gc-gold-dim); }
+.gc-title { flex: 1; text-align: center; }
+.gc-month { font-size: 1.25em; font-weight: bold; font-family: var(--font-h1, serif); color: var(--gc-gold); }
+.gc-sub { font-size: 0.82em; color: var(--gc-muted); font-style: italic; }
+
+.gc-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0.18em; margin-top: 0.35em; }
+.gc-wd { text-align: center; font-size: 0.78em; font-weight: bold; color: var(--gc-muted); }
+.gc-cell { min-height: 2.6em; border-radius: 0.3em; position: relative; }
+.gc-day {
+  display: flex; flex-direction: column; padding: 0.12em 0.25em;
+  background: var(--gc-tint); border: 1px solid transparent; cursor: pointer;
+}
+.gc-day:hover { border-color: var(--gc-gold); }
+.gc-num { font-size: 0.9em; font-weight: bold; }
+.gc-moon { position: absolute; top: 0.05em; right: 0.15em; font-size: 0.75em; }
+.gc-dots { margin-top: auto; display: flex; gap: 0.18em; flex-wrap: wrap; }
+.gc-dot { width: 0.5em; height: 0.5em; border-radius: 50%; display: inline-block; }
+.gc-today { border-color: var(--gc-gold); }
+.gc-today .gc-num { color: var(--gc-gold); }
+.gc-selected { background: var(--gc-gold-dim); }
+
+.gc-panel { margin-top: 0.45em; padding: 0.4em 0.5em; background: var(--gc-tint); border-radius: 0.4em; }
+.gc-panel-head { display: flex; justify-content: space-between; align-items: center; color: var(--gc-gold); }
+.gc-panel-info { display: flex; flex-wrap: wrap; gap: 0.2em 0.9em; font-size: 0.85em; color: var(--gc-muted); margin-top: 0.1em; }
+.gc-notes { list-style: none; margin: 0.4em 0; padding: 0; display: flex; flex-direction: column; gap: 0.3em;
+  max-height: 14em; overflow-y: auto; }
+.gc-note { border-left: 0.25em solid var(--note-color); padding: 0.2em 0.45em; background: var(--gc-tint);
+  border-radius: 0 0.3em 0.3em 0; user-select: text; }
+.gc-note-head { display: flex; align-items: center; gap: 0.35em; }
+.gc-note-head > i { font-size: 0.8em; opacity: 0.6; }
+.gc-note-controls { margin-left: auto; display: flex; gap: 0.5em; font-size: 0.85em; }
+.gc-note-body { font-size: 0.9em; margin-top: 0.1em; }
+.gc-note-author { font-size: 0.78em; color: var(--gc-muted); font-style: italic; text-align: right; }
+.gc-none { color: var(--gc-muted); font-style: italic; font-size: 0.9em; }
+.gc-panel-buttons { display: flex; gap: 0.25em; }
+.gc-panel-buttons button { flex: 1 1 auto !important; }
+
+/* ================= Dialogs ================= */
+.golarion-calendar-dialog .gc-form { display: flex; flex-direction: column; gap: 0.5rem; }
+.golarion-calendar-dialog .gc-form label { display: flex; flex-direction: column; gap: 0.15rem; }
+.golarion-calendar-dialog .gc-form-row { display: flex; gap: 0.5rem; }
+.golarion-calendar-dialog .gc-form-row label { flex: 1; }
+.golarion-calendar-dialog .gc-check { flex-direction: row !important; align-items: flex-start; gap: 0.5rem !important; }
+.golarion-calendar-dialog .gc-check small { opacity: 0.7; }
+
+/* ================= Chat ================= */
+.gc-chat h3 { margin: 0 0 0.2rem; }
+.gc-chat p { margin: 0; opacity: 0.85; }
