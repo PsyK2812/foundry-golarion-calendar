@@ -2,7 +2,7 @@
   "id": "golarion-calendar",
   "title": "Golarion Calendar",
   "description": "Absalom Reckoning (Golarion) calendar: draggable date & time widget that expands into a month view, configurable time buttons, GM and player notes, moon phases, seasonal sunrise/sunset, and automatic scene darkness that follows the time of day and the moon.",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "authors": [
     {
       "name": "Yannic"

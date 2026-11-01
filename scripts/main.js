@@ -270,7 +270,9 @@ function dateFromSeconds(s) {
   const sec = s - abs * DAY;
   return { ...fromAbsDay(abs), abs, hours: sec / 3600, hour: Math.floor(sec / 3600), minute: Math.floor((sec % 3600) / 60) };
 }
-function currentDate() { return dateFromSeconds(nowSeconds()); }
+/** The time shown to the user: the animated time while a time change is playing, else the real one. */
+function displaySeconds() { return Tween.value() ?? nowSeconds(); }
+function currentDate() { return dateFromSeconds(displaySeconds()); }
 
 const pad = n => String(n).padStart(2, "0");
 const fmtHM = h => { const t = Math.round(mod(h, 24) * 60); return `${pad(Math.floor(t / 60) % 24)}:${pad(t % 60)}`; };
@@ -290,12 +292,108 @@ function fmtDate(c, weekdayName = true) {
 
 async function advanceTime(seconds) {
   if (!game.user.isGM) return ui.notifications.warn("Only the GM can change the time.");
-  if (seconds) await game.time.advance(seconds);
+  if (!seconds) return;
+  await Tween.finishing;
+  // Stack clicks: a second click while the clock is still ticking adds to where it is heading.
+  const base = Tween.state ? Tween.state.to : nowSeconds();
+  const target = base + seconds;
+  const from = Tween.value() ?? nowSeconds();
+  const span = Math.abs(target - from);
+  const animate = S("animateTime") && span >= 60 && span <= num("tweenMaxHours") * 3600;
+  if (!animate) {
+    Tween.cancel();
+    return game.time.advance(target - nowSeconds());
+  }
+  const dur = Math.min(num("tweenMaxSeconds"), 0.4 + (span / 3600) * num("tweenSecondsPerHour")) * 1000;
+  Tween.start(from, target, dur, true);
+  game.socket.emit(SOCKET, { op: "tween", from, to: target, dur });
 }
+
+/* ================================================================== */
+/*  Animated time changes                                              */
+/* ================================================================== */
+
+/**
+ * When the GM adds or subtracts time, every client plays the change as a fast
+ * minute-by-minute count, and the GM steps the scene darkness along with it.
+ * World time itself is advanced once, at the end, so effects and durations
+ * only update once.
+ */
+const Tween = {
+  state: null,       // { from, to, t0, dur, owner }
+  frame: null,
+  lastRender: 0,
+  lastShown: null,
+  lastLight: 0,
+  finishing: null,
+
+  value() {
+    const st = this.state;
+    if (!st) return null;
+    const p = Math.min(1, (performance.now() - st.t0) / st.dur);
+    const e = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2; // ease in-out
+    return st.from + (st.to - st.from) * e;
+  },
+
+  start(from, to, dur, owner = false) {
+    this.state = { from, to, t0: performance.now(), dur: Math.max(100, dur), owner };
+    if (!this.frame) this.frame = requestAnimationFrame(() => this.step());
+    // Safety: never leave a client stuck on an animated time.
+    clearTimeout(this.safety);
+    this.safety = setTimeout(() => { if (this.state && !this.state.owner) this.cancel(); }, dur + 5000);
+  },
+
+  step() {
+    this.frame = null;
+    const st = this.state;
+    if (!st) return;
+    const now = performance.now();
+    const done = now - st.t0 >= st.dur;
+
+    // Redraw the widget whenever the shown minute changes (at most ~30 times a second).
+    const minute = Math.floor(this.value() / 60);
+    if (minute !== this.lastShown && now - this.lastRender > 33) {
+      this.lastShown = minute;
+      this.lastRender = now;
+      Widget.render();
+    }
+
+    // The GM who started it steps the scene darkness along with the clock.
+    if (st.owner && now - this.lastLight > 1000 / Math.max(1, num("tweenLightSteps"))) {
+      this.lastLight = now;
+      runLighting({ animate: false });
+    }
+
+    if (!done) { this.frame = requestAnimationFrame(() => this.step()); return; }
+    if (st.owner) this.finish();
+    else Widget.render(); // stay on the end time until the real world time arrives
+  },
+
+  async finish() {
+    const st = this.state;
+    this.finishing = (async () => {
+      try { await game.time.advance(st.to - nowSeconds()); }
+      catch (err) { console.error(`${MODULE_ID} | Could not advance time`, err); }
+      if (this.state === st) this.state = null;
+      this.finishing = null;
+      refreshAll();
+    })();
+    return this.finishing;
+  },
+
+  cancel() {
+    if (!this.state) return;
+    this.state = null;
+    if (this.frame) cancelAnimationFrame(this.frame);
+    this.frame = null;
+    Widget.render();
+  }
+};
 
 /** Advance to the next occurrence of a time of day (in hours, or "sunrise"/"sunset"). */
 async function jumpTo(target) {
-  const now = nowSeconds();
+  await Tween.finishing;
+  const now = Tween.state ? Tween.state.to : nowSeconds();
   const today = Math.floor(now / DAY);
   for (let d = today; d <= today + 2; d++) {
     const sun = sunTimes(d);
@@ -596,7 +694,7 @@ const Widget = {
     const isGM = game.user.isGM;
     const c = currentDate();
     const sun = sunTimes(c.abs);
-    const moon = moonPhase(nowSeconds() / DAY);
+    const moon = moonPhase(displaySeconds() / DAY);
     const label = timeOfDay(c.hours, sun);
     const todays = notesFor(c.year, c.month, c.day);
     const expanded = this.expanded;
@@ -877,7 +975,7 @@ const Clock = {
     const now = Date.now();
     const realSeconds = (now - this.last) / 1000;
     this.last = now;
-    if (this.blocked()) { this.carry = 0; return; }
+    if (this.blocked() || Tween.state || Tween.finishing) { this.carry = 0; return; }
     // Ignore huge gaps (e.g. laptop asleep) instead of jumping hours ahead.
     if (realSeconds > Math.max(60, num("clockTick") * 5)) return;
     this.carry += realSeconds * Math.max(0.01, num("clockSpeed"));
@@ -920,7 +1018,7 @@ async function runLighting({ animate }) {
   if (lightingRunning) { lightingPending = { animate }; return; }
   lightingRunning = true;
   try {
-    const target = Math.round(targetDarkness(nowSeconds()) * 1000) / 1000;
+    const target = Math.round(targetDarkness(displaySeconds()) * 1000) / 1000;
     const scenes = new Set([game.scenes.active, canvas?.scene].filter(Boolean));
     for (const scene of scenes) {
       if (!sceneUsesAutoLight(scene)) continue;
@@ -1150,6 +1248,33 @@ function registerSettings() {
     type: Number, default: 0.25, range: { min: 0, max: 1, step: 0.05 }
   });
 
+  // --- Animated time changes ----------------------------------------
+  world("animateTime", {
+    name: "Time changes: Animate",
+    hint: "When the GM adds or subtracts time, the clock counts through the minutes quickly and the scene darkness changes along with it, instead of jumping.",
+    type: Boolean, default: true
+  });
+  world("tweenSecondsPerHour", {
+    name: "Time changes: Seconds per in-game hour",
+    hint: "How long the count takes for each hour of time changed. 0.75 = +1h takes about a second.",
+    type: Number, default: 0.75, range: { min: 0.1, max: 5, step: 0.05 }
+  });
+  world("tweenMaxSeconds", {
+    name: "Time changes: Longest animation (seconds)",
+    hint: "Big changes (e.g. +8h) never take longer than this; they just count faster.",
+    type: Number, default: 4, range: { min: 0.5, max: 15, step: 0.5 }
+  });
+  world("tweenMaxHours", {
+    name: "Time changes: Don't animate changes longer than (hours)",
+    hint: "Bigger changes just jump. 24 = up to one day is animated.",
+    type: Number, default: 24, range: { min: 1, max: 168, step: 1 }
+  });
+  world("tweenLightSteps", {
+    name: "Time changes: Darkness updates per second",
+    hint: "How often the scene darkness is updated while the clock counts. Higher = smoother light, but more updates sent to every player.",
+    type: Number, default: 8, range: { min: 2, max: 20, step: 1 }
+  });
+
   // --- Real-time clock ---------------------------------------------
   const clockChange = () => { Clock.restart(); Widget.render(); };
   world("clockSpeed", {
@@ -1208,6 +1333,10 @@ Hooks.once("init", () => {
 
 Hooks.once("ready", () => {
   game.socket.on(SOCKET, data => {
+    if (data?.op === "tween") {
+      if (S("animateTime")) Tween.start(Number(data.from), Number(data.to), Number(data.dur));
+      return;
+    }
     if (!game.users.activeGM?.isSelf) return;
     if (data?.op) handleNoteOp(data.op, data.payload ?? {}, data.userId);
   });
@@ -1238,6 +1367,7 @@ Hooks.on("canvasReady", () => applyLighting({ animate: false }));
 Hooks.on("userConnected", () => Clock.sync());
 
 Hooks.on("updateWorldTime", (worldTime, delta) => {
+  if (Tween.state && !Tween.state.owner) Tween.cancel();
   refreshAll();
   if (!game.users.activeGM?.isSelf || !S("announceDay")) return;
 
