@@ -41,6 +41,12 @@
 .gc-w-event { color: var(--gc-gold); margin-left: 0.4em; }
 .gc-w-event i { margin-right: 0.15em; font-size: 0.85em; }
 .gc-w-expand { padding: 0.1em 0.3em; border-radius: 0.3em; }
+.gc-w-clock { padding: 0.1em 0.35em; border-radius: 0.3em; font-size: 0.9em; opacity: 0.75; }
+.gc-w-clock:hover { background: var(--gc-gold-dim); opacity: 1; }
+.gc-w-clock.gc-running { color: var(--gc-gold); opacity: 1; }
+.gc-w-clock-indicator { color: var(--gc-gold); font-size: 0.85em; }
+.gc-running i, i.gc-running { animation: gc-pulse 2s ease-in-out infinite; }
+@keyframes gc-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 .gc-w-expand:hover { background: var(--gc-gold-dim); }
 
 .gc-expanded .gc-w-date { font-size: 1.25em; }

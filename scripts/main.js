@@ -609,11 +609,17 @@ const Widget = {
 
     const showMoon = S("showMoonInWidget");
     const wdName = WEEKDAYS[weekday(c.abs)];
+    const running = Clock.running;
+    const clockButton = isGM
+      ? `<a class="gc-w-clock ${running ? "gc-running" : ""}" data-gc="clock" aria-label="${running ? "Stop clock" : "Start clock"}">
+           <i class="fa-solid fa-${running ? "pause" : "play"}"></i></a>`
+      : (running && S("clockShowPlayers") ? `<i class="fa-solid fa-clock gc-w-clock-indicator gc-running"></i>` : "");
     let html = `
       <div class="gc-w-top">
         <i class="fa-solid ${TIME_ICONS[label]} gc-w-tod gc-tod-${label.toLowerCase()}"></i>
         <span class="gc-w-weekday">${S("showWeekday") ? wdName : MONTHS[c.month].season}</span>
         ${showMoon ? `<span class="gc-w-moon" data-tooltip="${esc(moon.label)} (${Math.round(moon.illum * 100)}%)">${moon.icon}</span>` : ""}
+        ${clockButton}
         <a class="gc-w-expand" data-gc="toggle"><i class="fa-solid fa-chevron-${expanded ? "up" : "down"}"></i></a>
       </div>
       <div class="gc-w-date">${fmtDay(c.day)} ${MONTHS[c.month].name}</div>
@@ -744,6 +750,7 @@ const Widget = {
     const invert = ev.shiftKey && S("shiftInverts") ? -1 : 1;
     switch (t.dataset.gc) {
       case "toggle": return this.setExpanded(!this.expanded);
+      case "clock": return Clock.toggle();
       case "adv": return advanceTime(Number(t.dataset.seconds) * invert);
       case "jump": return jumpTo(t.dataset.target);
       case "prevMonth": return this.shiftMonth(-1);
@@ -822,6 +829,66 @@ const Widget = {
 };
 
 /* ================================================================== */
+/*  Real-time clock                                                    */
+/* ================================================================== */
+
+/**
+ * While running, the active GM's client advances world time in step with
+ * real time (times the speed setting). Uses real timestamps, so a slow or
+ * throttled browser tab doesn't make the clock drift.
+ */
+const Clock = {
+  timer: null,
+  last: 0,
+  carry: 0,
+
+  get running() { return !!S("clockRunning"); },
+
+  async toggle() {
+    if (!game.user.isGM) return;
+    await game.settings.set(MODULE_ID, "clockRunning", !this.running);
+  },
+
+  blocked() {
+    if (S("clockPauseWithGame") && game.paused) return true;
+    if (S("clockPauseInCombat") && game.combats?.some(c => c.started && (!c.scene || c.scene === canvas?.scene))) return true;
+    return false;
+  },
+
+  sync() {
+    const shouldRun = this.running && game.users.activeGM?.isSelf;
+    if (shouldRun && !this.timer) {
+      this.last = Date.now();
+      this.carry = 0;
+      const every = Math.max(1, num("clockTick")) * 1000;
+      this.timer = setInterval(() => this.tick(), every);
+    } else if (!shouldRun && this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+  },
+
+  restart() {
+    if (this.timer) { clearInterval(this.timer); this.timer = null; }
+    this.sync();
+  },
+
+  async tick() {
+    const now = Date.now();
+    const realSeconds = (now - this.last) / 1000;
+    this.last = now;
+    if (this.blocked()) { this.carry = 0; return; }
+    // Ignore huge gaps (e.g. laptop asleep) instead of jumping hours ahead.
+    if (realSeconds > Math.max(60, num("clockTick") * 5)) return;
+    this.carry += realSeconds * Math.max(0.01, num("clockSpeed"));
+    const whole = Math.floor(this.carry);
+    if (whole < 1) return;
+    this.carry -= whole;
+    await game.time.advance(whole);
+  }
+};
+
+/* ================================================================== */
 /*  Scene lighting                                                     */
 /* ================================================================== */
 
@@ -863,7 +930,9 @@ async function runLighting({ animate }) {
       const delta = Math.abs(current - target);
       if (delta < 0.005) continue;
       const ms = animate && num("transitionMs") > 0 && delta >= num("animateThreshold") ? num("transitionMs") : 0;
-      await scene.update({ [path]: target }, { animateDarkness: ms });
+      // Only pass a duration when we really want Foundry's animation (and its "Transitioning…" banner).
+      // A value of 0 is not treated as "off" by Foundry, so send false explicitly.
+      await scene.update({ [path]: target }, { animateDarkness: ms > 0 ? ms : false });
     }
   } catch (err) {
     console.error(`${MODULE_ID} | Could not update scene darkness`, err);
@@ -1072,8 +1141,8 @@ function registerSettings() {
   });
   world("transitionMs", {
     name: "Lighting: Animation duration for big jumps (ms)",
-    hint: "When the darkness jumps a lot at once (e.g. skipping several hours), the change animates over this time. 0 = never animate.",
-    type: Number, default: 2000, range: { min: 0, max: 10000, step: 250 }
+    hint: "If above 0, big darkness jumps (e.g. skipping several hours) use Foundry's animated transition, which shows a 'Transitioning…' banner. 0 = never animate, the darkness just changes.",
+    type: Number, default: 0, range: { min: 0, max: 10000, step: 250 }
   });
   world("animateThreshold", {
     name: "Lighting: Animate changes larger than",
@@ -1081,7 +1150,37 @@ function registerSettings() {
     type: Number, default: 0.25, range: { min: 0, max: 1, step: 0.05 }
   });
 
+  // --- Real-time clock ---------------------------------------------
+  const clockChange = () => { Clock.restart(); Widget.render(); };
+  world("clockSpeed", {
+    name: "Clock: Speed",
+    hint: "In-game seconds that pass per real second while the clock runs. 1 = real time, 2 = twice as fast, 0.5 = half speed.",
+    type: Number, default: 1, range: { min: 0.25, max: 60, step: 0.25 }, onChange: clockChange
+  });
+  world("clockTick", {
+    name: "Clock: Update interval (seconds)",
+    hint: "How often the running clock moves time forward. Lower = smoother widget and lighting, but more updates sent to all players.",
+    type: Number, default: 10, range: { min: 1, max: 60, step: 1 }, onChange: clockChange
+  });
+  world("clockPauseWithGame", {
+    name: "Clock: Hold while Foundry is paused",
+    hint: "While the game is paused (space bar), the running clock doesn't advance. It continues on its own when you unpause.",
+    type: Boolean, default: true, onChange: clockChange
+  });
+  world("clockPauseInCombat", {
+    name: "Clock: Hold during combat",
+    hint: "While a combat on the current scene is running, the clock doesn't advance (combat rounds move time on their own).",
+    type: Boolean, default: true, onChange: clockChange
+  });
+  world("clockShowPlayers", {
+    name: "Clock: Show players when the clock is running",
+    hint: "Shows a small clock icon on the players' widget while time is running.",
+    type: Boolean, default: false, onChange: clockChange
+  });
+
   // --- Hidden -------------------------------------------------------
+  hidden("clockRunning", { scope: "world", type: Boolean, default: false,
+    onChange: v => { Clock.sync(); Widget.render(); if (game.user.isGM) ui.notifications.info(`Golarion Calendar: clock ${v ? "started" : "stopped"}.`); } });
   hidden("epoch", { scope: "world", type: Object, default: { year: 4710, month: 0, day: 1, offset: 0 }, onChange: refreshAll });
   hidden("notes", { scope: "world", type: Array, default: [], onChange: () => Widget.render() });
   hidden("widgetPos", { scope: "client", type: Object, default: {} });
@@ -1099,6 +1198,12 @@ Hooks.once("init", () => {
     editable: [],
     onDown: () => { Widget.setExpanded(!Widget.expanded); return true; }
   });
+  game.keybindings.register(MODULE_ID, "clock", {
+    name: "Start / stop the real-time clock",
+    editable: [],
+    restricted: true,
+    onDown: () => { Clock.toggle(); return true; }
+  });
 });
 
 Hooks.once("ready", () => {
@@ -1109,6 +1214,7 @@ Hooks.once("ready", () => {
 
   Widget.render();
   applyLighting({ animate: false });
+  Clock.sync();
   window.addEventListener("resize", () => Widget.clampToScreen());
 
   game.modules.get(MODULE_ID).api = {
@@ -1119,12 +1225,17 @@ Hooks.once("ready", () => {
     setDate: setCurrentDateTime,
     sunTimes, moonPhase, targetDarkness, toAbsDay, fromAbsDay,
     applyLighting,
+    startClock: () => game.settings.set(MODULE_ID, "clockRunning", true),
+    stopClock: () => game.settings.set(MODULE_ID, "clockRunning", false),
+    toggleClock: () => Clock.toggle(),
     expand: v => Widget.setExpanded(v ?? true),
     MONTHS, WEEKDAYS
   };
 });
 
 Hooks.on("canvasReady", () => applyLighting({ animate: false }));
+// The GM who runs the clock can change (another GM logs in/out).
+Hooks.on("userConnected", () => Clock.sync());
 
 Hooks.on("updateWorldTime", (worldTime, delta) => {
   refreshAll();
