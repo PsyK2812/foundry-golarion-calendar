@@ -1305,7 +1305,7 @@ function registerSettings() {
 
   // --- Hidden -------------------------------------------------------
   hidden("clockRunning", { scope: "world", type: Boolean, default: false,
-    onChange: v => { Clock.sync(); Widget.render(); if (game.user.isGM) ui.notifications.info(`Golarion Calendar: clock ${v ? "started" : "stopped"}.`); } });
+    onChange: () => { Clock.sync(); Widget.render(); } });
   hidden("epoch", { scope: "world", type: Object, default: { year: 4710, month: 0, day: 1, offset: 0 }, onChange: refreshAll });
   hidden("notes", { scope: "world", type: Array, default: [], onChange: () => Widget.render() });
   hidden("widgetPos", { scope: "client", type: Object, default: {} });
